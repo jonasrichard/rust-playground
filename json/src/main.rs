@@ -3,10 +3,10 @@ use std::io::{self, BufReader, Read};
 
 #[derive(Debug, PartialEq)]
 enum Json {
-    JsonNumber(i32),
-    JsonString(String),
-    JsonArray(Vec<Json>),
-    JsonObject(HashMap<String, Json>)
+    Number(i32),
+    String(String),
+    Array(Vec<Json>),
+    Object(HashMap<String, Json>)
 }
 
 // TODO skip whitespaces
@@ -20,13 +20,13 @@ fn read_number(input: &Vec<char>, pos: &mut usize) -> Result<Json, String> {
                 result.push(c),
             _ => {
                 *pos -= 1;
-                return Ok(Json::JsonNumber(result.parse::<i32>().unwrap()))
+                return Ok(Json::Number(result.parse::<i32>().unwrap()))
             }
         }
         *pos += 1
     }
 
-    Ok(Json::JsonNumber(result.parse::<i32>().unwrap()))
+    Ok(Json::Number(result.parse::<i32>().unwrap()))
 }
 
 fn read_string(input: &Vec<char>, pos: &mut usize) -> Result<String, String> {
@@ -54,7 +54,7 @@ fn read_value(input: &Vec<char>, mut pos: &mut usize) -> Result<Json, String> {
     match input[*pos] {
         '"' => {
             let value = read_string(input, &mut pos)?;
-            return Ok(Json::JsonString(value))
+            Ok(Json::String(value))
         },
         c if c >= '0' && c <= '9' =>
             read_number(input, &mut pos),
@@ -69,7 +69,7 @@ fn read_array(input: &Vec<char>, pos: &mut usize) -> Result<Json, String> {
     while *pos < input.len() {
         match input[*pos] {
             ']' =>
-                return Ok(Json::JsonArray(array)),
+                return Ok(Json::Array(array)),
             n if n >= '0' && n <= '9' => {
                 match read_number(input, pos) {
                     Ok(number) =>
@@ -95,7 +95,7 @@ fn read_object(input: &Vec<char>, mut pos: &mut usize) -> Result<Json, String> {
     while *pos < input.len() {
         match input[*pos] {
             '}' =>
-                return Ok(Json::JsonObject(result)),
+                return Ok(Json::Object(result)),
             '"' => {
                 // field name, color and value
                 let name = read_string(&input, &mut pos)?;
@@ -144,7 +144,7 @@ fn read_json(input: String) -> Result<Json, String> {
     let chars = input.chars().collect();
     let mut pos: usize = 0;
 
-    return read_json_from_chars(&chars, &mut pos);
+    read_json_from_chars(&chars, &mut pos)
 }
 
 fn main() {
@@ -173,10 +173,10 @@ mod tests {
         let obj = read_json("{\"field1\":5,\"field2\":\"apple\"}".to_string()).expect("");
 
         let mut map = HashMap::new();
-        map.insert("field1".to_string(), Json::JsonNumber(5));
-        map.insert("field2".to_string(), Json::JsonString("apple".to_string()));
+        map.insert("field1".to_string(), Json::Number(5));
+        map.insert("field2".to_string(), Json::String("apple".to_string()));
 
-        let json_obj = Json::JsonObject(map);
+        let json_obj = Json::Object(map);
         assert_eq!(obj, json_obj);
         Ok(())
     }
@@ -185,9 +185,9 @@ mod tests {
         let mut result = Vec::new();
 
         for i in arr {
-            result.push(Json::JsonNumber(i));
+            result.push(Json::Number(i));
         }
 
-        return Json::JsonArray(result)
+        return Json::Array(result)
     }
 }

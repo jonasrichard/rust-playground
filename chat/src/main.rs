@@ -6,27 +6,31 @@ extern crate tokio_postgres;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
 use tokio_postgres::{Error, NoTls};
 
-pub mod channel {
-
-    use chrono::{DateTime, Utc};
-
-    pub struct Channel {
-        id: i32,
-        name: String,
-        members: Vec<User>,
-        last_message: String,
-        last_modified: DateTime<Utc>,
-    }
-
-    pub struct User {
-        id: i32,
-        name: String,
-    }
-
+/// Functions, data structures for handling chat channels
+//pub mod channel {
+//
+//    use chrono::{DateTime, Utc};
+//
+//    /// Represent a chat channel, it has a name and members.
+//    /// It also caches the last message and the timestamp when it was sent.
+//    pub struct Channel {
+//        id: i32,
+//        name: String,
+//        members: Vec<User>,
+//        last_message: String,
+//        last_modified: DateTime<Utc>,
+//    }
+//
+//    ///! Represent a user in the system.
+//    pub struct User {
+//        id: i32,
+//        name: String,
+//    }
+//
     // TODO type alias i32 to user id
 //    pub fn create_channel(client: &mut postgres::Client, name: String, _members: Vec<i32>) -> Result<Channel, String> {
 //        match client.execute("INSERT INTO channel (name) values ($1)", &[&name]) {
@@ -39,10 +43,15 @@ pub mod channel {
 //        }
 //        Err("x".to_string())
 //    }
-}
+//}
 
-async fn hello_world(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    Ok(Response::new("Hello, World".into()))
+async fn route(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/") =>
+            Ok(Response::new("ping".into())),
+        (_, _) =>
+            Ok(Response::builder().status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap())
+    }
 }
 
 #[tokio::main]
@@ -73,7 +82,7 @@ async fn main() -> Result<(), Error> {
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
     let service = make_service_fn(|_client| async {
-        Ok::<_, Infallible>(service_fn(hello_world))
+        Ok::<_, Infallible>(service_fn(route))
     });
 
     let server = Server::bind(&addr).serve(service);

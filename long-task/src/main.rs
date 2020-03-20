@@ -1,49 +1,42 @@
 extern crate futures;
+extern crate rand;
 
 #[allow(unused_imports)]
 use std::future::Future;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use futures::executor;
-use futures::future::join_all;
+use futures::{executor, future::join_all, task::SpawnExt};
 
-fn task1(num: i32) -> impl Future<Output = i32> {
-    async move {
-        thread::sleep(Duration::from_millis(100));
+use rand::random;
 
-        num
-    }
+fn sleep_time() -> u32 {
+    200 + random::<u32>() % 3000
+}
+
+async fn task(num: i32) {
+    let t = sleep_time();
+    let time = Duration::from_millis(u64::from(t));
+
+    thread::sleep(time);
+
+    println!("{} has awaken after {:?}", num, time);
 }
 
 fn main() {
-    let mut tasks = Vec::new();
-
-    for i in 1..10 {
-        tasks.push(task1(i));
-    }
-
+    let mut futs = Vec::new();
+    let pool = futures::executor::ThreadPoolBuilder::new().pool_size(2).create().expect("I cannot");
+    
+    println!("Party started");
     let now = Instant::now();
-
-    for fut in tasks {
-        let value: i32 = executor::block_on(fut);
-
-        println!("{}", value);
+    
+    for i in 1..5 {
+        let join_handle = pool.spawn_with_handle(task(i)).unwrap();
+        futs.push(join_handle);
     }
 
-    println!("Took {:?} time", now.elapsed());
+    let res = executor::block_on(join_all(futs));
 
-    let mut tasks2 = Vec::new();
-
-    for i in 1..10 {
-        tasks2.push(task1(i));
-    }
-
-    println!("Join all");
-    let now2 = Instant::now();
-
-    let results = executor::block_on(join_all(tasks2));
-
-    println!("{:?}", results);
-    println!("Took {:?} time", now2.elapsed());
+    println!("{:?}", res);
+    println!("{:?}", now.elapsed());
 }

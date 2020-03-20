@@ -1,30 +1,49 @@
+extern crate futures;
+
+#[allow(unused_imports)]
 use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::time::{Instant};
+use std::thread;
+use std::time::{Duration, Instant};
 
-struct LongTask {
-    length_in_ms: i32,
-    created_time: Instant,
-}
+use futures::executor;
+use futures::future::join_all;
 
-impl LongTask {
-    fn new(length: i32) -> LongTask {
-        LongTask {
-            length_in_ms: length,
-            created_time: Instant::now()
-        }
-    }
-}
+fn task1(num: i32) -> impl Future<Output = i32> {
+    async move {
+        thread::sleep(Duration::from_millis(100));
 
-impl Future for LongTask {
-    type Output = i32;
-
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-        Poll::Pending
+        num
     }
 }
 
 fn main() {
-    let tasks: Vec<LongTask> = vec![LongTask::new(400)];
+    let mut tasks = Vec::new();
+
+    for i in 1..10 {
+        tasks.push(task1(i));
+    }
+
+    let now = Instant::now();
+
+    for fut in tasks {
+        let value: i32 = executor::block_on(fut);
+
+        println!("{}", value);
+    }
+
+    println!("Took {:?} time", now.elapsed());
+
+    let mut tasks2 = Vec::new();
+
+    for i in 1..10 {
+        tasks2.push(task1(i));
+    }
+
+    println!("Join all");
+    let now2 = Instant::now();
+
+    let results = executor::block_on(join_all(tasks2));
+
+    println!("{:?}", results);
+    println!("Took {:?} time", now2.elapsed());
 }

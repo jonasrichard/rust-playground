@@ -2,6 +2,8 @@ extern crate chrono;
 extern crate tokio_postgres;
 
 use chrono::{DateTime, Utc};
+use tokio_postgres::{Error, NoTls};
+
 use crate::user;
 
 /// Represent a chat channel, it has a name and members.
@@ -9,9 +11,9 @@ use crate::user;
 pub struct Channel {
     id: i32,
     name: String,
-    members: Vec<user::User>,
-    last_message: String,
-    last_modified: DateTime<Utc>,
+    //members: Vec<user::User>,
+    //last_message: String,
+    //last_modified: DateTime<Utc>,
 }
 
 pub async fn create_channel(client: &mut tokio_postgres::Client, name: String, _members: Vec<i32>) -> Result<Channel, String> {
@@ -26,7 +28,27 @@ pub async fn create_channel(client: &mut tokio_postgres::Client, name: String, _
     Err("x".to_string())
 }
 
-pub fn find_channels() {
+pub async fn find_channels() -> Vec<Channel> {
+    let (client, connection) =
+        tokio_postgres::connect("host=localhost user=chat dbname=chat password=postgres", NoTls).await.unwrap();
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Connection error: {}", e);
+        }
+    });
+
+    let rows = client.query("select id, name from channel", &[]).await.unwrap();
+    let mut result = Vec::new();
+
+    for row in rows {
+        result.push(Channel{
+            id: row.get(0),
+            name: row.get(1)
+        });
+    }
+
+    result
 }
 
 //pub fn find_channels(client: &mut tokio_postgres::Client) -> Result<Vec<Channel>, String> {

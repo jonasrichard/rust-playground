@@ -5,7 +5,7 @@ CREATE TABLE channel (
     last_modified timestamp,
     primary key(id));
 
-CREATE TABLE user (
+CREATE TABLE chat_user (
     id serial,
     name varchar(100) not null,
     primary key(id));

@@ -11,7 +11,7 @@ struct Hashtable {
 impl Hashtable {
     fn new() -> Self {
         let mut vals = Vec::<Option<Item>>::new();
-        
+
         vals.resize_with(64, || None);
 
         Hashtable {
@@ -24,7 +24,7 @@ impl Hashtable {
         (key % self.size as u32) as usize
     }
 
-    fn insert(&mut self, key: u32, value: String) -> bool {
+    fn put(&mut self, key: u32, value: String) -> bool {
         let h = self.hash(key);
 
         match self.values[h] {
@@ -34,6 +34,17 @@ impl Hashtable {
             },
             _ =>
                 false
+        }
+    }
+
+    fn get(&self, key: u32) -> Option<String> {
+        let h = self.hash(key);
+
+        match self.values[h].as_ref() {
+            Some(item) if item.key == h as u32 =>
+                Some(String::from(&item.value)),
+            _ =>
+                None
         }
     }
 
@@ -52,6 +63,21 @@ impl Hashtable {
 fn main() {
     let mut ht = Hashtable::new();
 
-    ht.insert(3, "Test".to_string());
+    ht.put(3, "Test".to_string());
     ht.print();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn insert() {
+        let mut ht = Hashtable::new();
+        ht.put(5, "Apple".to_string());
+
+        assert_eq!(ht.get(5), Some("Apple".to_string()));
+        assert_eq!(ht.get(5 + 64), None);
+        assert_eq!(ht.get(4), None);
+    }
 }

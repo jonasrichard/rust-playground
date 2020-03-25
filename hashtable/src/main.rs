@@ -1,3 +1,4 @@
+#[derive(Debug)]
 struct Item {
     key: u32,
     value: String
@@ -32,8 +33,22 @@ impl Hashtable {
                 self.values[h].get_or_insert(Item{key: key, value: value});
                 true
             },
-            _ =>
+            _ => {
+                let mut i = (h + 1) % self.size;
+
+                while i != h {
+                    match self.values[i] {
+                        None => {
+                            self.values[i].get_or_insert(Item{key: key, value: value});
+                            return true
+                        },
+                        _ =>
+                            i = (i + 1) % self.size
+                    }
+                }
+
                 false
+            }
         }
     }
 
@@ -41,10 +56,22 @@ impl Hashtable {
         let h = self.hash(key);
 
         match self.values[h].as_ref() {
-            Some(item) if item.key == h as u32 =>
+            Some(item) if item.key == key =>
                 Some(String::from(&item.value)),
-            _ =>
+            _ => {
+                let mut i = (h + 1) % self.size;
+
+                while i != h {
+                    match self.values[i].as_ref() {
+                        Some(item) if item.key == key =>
+                            return Some(String::from(&item.value)),
+                        _ =>
+                            i = (i + 1) % self.size
+                    }
+                }
+
                 None
+            }
         }
     }
 
@@ -79,5 +106,15 @@ mod tests {
         assert_eq!(ht.get(5), Some("Apple".to_string()));
         assert_eq!(ht.get(5 + 64), None);
         assert_eq!(ht.get(4), None);
+    }
+
+    #[test]
+    fn insert_with_overflow() {
+        let mut ht = Hashtable::new();
+        ht.put(5, "Apple".to_string());
+        ht.put(69, "Peach".to_string());
+
+        assert_eq!(ht.get(5), Some("Apple".to_string()));
+        assert_eq!(ht.get(69), Some("Peach".to_string()));
     }
 }

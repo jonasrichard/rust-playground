@@ -1,18 +1,19 @@
 extern crate chrono;
-//#[macro_use]
-//extern crate json;
 extern crate tokio_postgres;
 
 mod channel;
 mod user;
 
+use crate::channel::Channel;
+
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 
+//use futures::TryStreamExt;
+use hyper::body;
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
-use tokio_postgres::{Error, NoTls};
+use tokio_postgres::Error;
 
 // Functions, data structures for handling chat channels
 
@@ -22,7 +23,18 @@ async fn route(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             Ok(Response::new("ping".into())),
         (&Method::GET, "/channel") => {
             let channels = channel::find_channels().await;
-            Ok(Response::new(channels.len().to_string().into()))
+            let channels_json = serde_json::to_string(&channels).unwrap();
+            Ok(Response::new(channels_json.into()))
+        },
+        (&Method::POST, "/channel") => {
+            let bytes = body::to_bytes(req.into_body()).await.unwrap();
+            let json: Channel = serde_json::from_slice(&bytes).unwrap();
+            match channel::create_channel(json).await {
+                Ok(_) =>
+                    Ok(Response::new("Success".into())),
+                Err(e) =>
+                    Ok(Response::builder().status(StatusCode::NOT_FOUND).body(e.into()).unwrap())
+            }
         },
         (_, _) => {
             println!("{}", req.uri().path());
@@ -34,14 +46,6 @@ async fn route(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-//    let data = object!{
-//        "id" => 3,
-//        "name" => "John Smith",
-//        "lang" => array!["en", "es"]
-//    };
-//
-//    println!("{:#}", data);
-
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 
     let service = make_service_fn(|_conn| async {

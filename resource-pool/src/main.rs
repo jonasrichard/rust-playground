@@ -49,24 +49,6 @@ impl Pool {
     fn is_conn_alive(&self, id: i32) -> bool {
         self.conns.iter().any(|conn| conn.id == id)
     }
-
-//    fn release(&mut self, item: &PoolItem) {
-//        match item {
-//            PoolItem::Available(n) =>
-//                match self.conns.iter().position(|e| *e == PoolItem::Busy) {
-//                    None =>
-//                        // panic
-//                        (),
-//                    Some(pos) => {
-//                        let e = self.conns.get_mut(pos).unwrap();
-//                        *e = PoolItem::Available(*n);
-//                        ()
-//                    }
-//                },
-//            _ =>
-//                ()
-//        }
-//    }
 }
 
 fn main() {

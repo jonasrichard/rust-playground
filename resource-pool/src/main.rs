@@ -1,12 +1,28 @@
-#[derive(Debug, PartialEq)]
-enum PoolItem {
-    Available(i32),
-    Busy
+use std::fmt;
+
+struct Connection {
+    id: i32,
+    log: Vec<String>
 }
 
 #[derive(Debug)]
 struct Pool {
-    conns: Vec<PoolItem>
+    conns: Vec<Connection>
+}
+
+impl PartialEq for Connection {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl fmt::Debug for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Connection")
+         .field("id", &self.id)
+         .field("log", &self.log)
+         .finish()
+    }
 }
 
 impl Pool {
@@ -14,7 +30,7 @@ impl Pool {
         let mut cs = Vec::new();
 
         for i in 0..4 {
-            cs.push(PoolItem::Available(i));
+            cs.push(Connection{id: i, log: Vec::new()});
         }
 
         Pool {
@@ -22,51 +38,59 @@ impl Pool {
         }
     }
 
-    fn get(&mut self) -> Option<PoolItem> {
-        match self.conns.iter().position(|e| *e != PoolItem::Busy) {
-            None =>
-                None,
-            Some(pos) => {
-                println!("{}", pos);
-                let (_left, right) = self.conns.split_at_mut(pos);
-
-                match right[0] {
-                    PoolItem::Busy =>
-                        None,
-                    PoolItem::Available(n) => {
-                        right[0] = PoolItem::Busy;
-                        Some(PoolItem::Available(n))
-                    }
-                }
-            }
-        }
+    fn get(&mut self) -> Option<Connection> {
+        self.conns.drain(0..1).take(1).next()
     }
 
-    fn release(&mut self, item: PoolItem) {
-        match item {
-            PoolItem::Available(n) =>
-                match self.conns.iter().position(|e| *e == PoolItem::Busy) {
-                    None =>
-                        // panic
-                        (),
-                    Some(pos) => {
-                        let e = self.conns.get_mut(pos).unwrap();
-                        *e = PoolItem::Available(n);
-                        ()
-                    }
-                },
-            _ =>
-                ()
-        }
+    fn release(&mut self, conn: Connection) {
+        self.conns.push(conn);
     }
+
+    fn is_conn_alive(&self, id: i32) -> bool {
+        self.conns.iter().any(|conn| conn.id == id)
+    }
+
+//    fn release(&mut self, item: &PoolItem) {
+//        match item {
+//            PoolItem::Available(n) =>
+//                match self.conns.iter().position(|e| *e == PoolItem::Busy) {
+//                    None =>
+//                        // panic
+//                        (),
+//                    Some(pos) => {
+//                        let e = self.conns.get_mut(pos).unwrap();
+//                        *e = PoolItem::Available(*n);
+//                        ()
+//                    }
+//                },
+//            _ =>
+//                ()
+//        }
+//    }
 }
 
 fn main() {
-    let mut pool = Pool::new();
+}
 
-    let res2 = pool.get().unwrap();
-    println!("{:?}", pool);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    pool.release(res2);
-    println!("{:?}", pool);
+    #[test]
+    fn get_first() {
+        let mut pool = Pool::new();
+        let conn = pool.get().unwrap();
+
+        assert_eq!(0, conn.id);
+    }
+
+    #[test]
+    fn put_back() {
+        let mut pool = Pool::new();
+        let conn = pool.get().unwrap();
+        let id = conn.id;
+
+        pool.release(conn);
+        assert!(pool.is_conn_alive(id));
+    }
 }

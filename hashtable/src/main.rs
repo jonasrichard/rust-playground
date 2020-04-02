@@ -1,3 +1,5 @@
+mod hashtable;
+
 #[derive(Debug)]
 struct Item {
     key: u32,

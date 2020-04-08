@@ -1,3 +1,5 @@
+mod connection_pool;
+
 use std::fmt;
 
 struct Connection {

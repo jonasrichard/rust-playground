@@ -23,8 +23,8 @@ type Result<T> = std::result::Result<T, Error>;
 
 async fn route(req: Request<Body>) -> Result<Response<Body>> {
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") =>
-            Ok(Response::new("ping".into())),
+        (&Method::GET, "/ping") =>
+            Ok(Response::new("pong".into())),
         (&Method::GET, "/channel") => {
             let channels = channel::find_channels().await;
             let channels_json = serde_json::to_string(&channels).unwrap();
@@ -41,8 +41,6 @@ async fn route(req: Request<Body>) -> Result<Response<Body>> {
             }
         },
         (_, _) => {
-            println!("{}", req.uri().path());
-            println!("{}", req.method());
             Ok(Response::builder().status(StatusCode::NOT_FOUND).body(Body::empty()).unwrap())
         }
     }

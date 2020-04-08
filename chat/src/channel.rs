@@ -1,11 +1,11 @@
 extern crate chrono;
 extern crate tokio_postgres;
 
-use chrono::{DateTime, Utc};
+//use chrono::{DateTime, Utc};
 use serde_derive::{Serialize, Deserialize};
-use tokio_postgres::{Error, NoTls};
+use tokio_postgres::NoTls;
 
-use crate::user;
+//use crate::user;
 
 /// Represent a chat channel, it has a name and members.
 /// It also caches the last message and the timestamp when it was sent.

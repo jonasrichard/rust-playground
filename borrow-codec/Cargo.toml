@@ -1,0 +1,13 @@
+[package]
+name = "borrow-codec"
+version = "0.1.0"
+authors = ["Richard Jonas <richard.jonas@derivco.se>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "1"
+futures = "0.3"
+tokio-util = { version = "0.6", features = ["codec"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt", "rt-multi-thread"] }

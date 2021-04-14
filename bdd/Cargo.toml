@@ -1,0 +1,18 @@
+[package]
+name = "bdd"
+version = "0.1.0"
+authors = ["jonasrichard <richard.jonas.76@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[[test]]
+name = "connect"
+harness = false
+
+[dev-dependencies]
+cucumber = { package = "cucumber_rust", version = "0.7" }
+async-trait = "0.1"
+futures = "0.3"

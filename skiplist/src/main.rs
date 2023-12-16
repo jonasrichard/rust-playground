@@ -418,7 +418,8 @@ mod tests {
                     prev = Some(p_rc);
                 }
                 Some(ref prev_rc) => {
-                    prev_rc.borrow_mut().next = Some(p_rc);
+                    prev_rc.borrow_mut().next = Some(p_rc.clone());
+                    prev = Some(p_rc);
                 }
             }
         }
@@ -490,6 +491,39 @@ mod tests {
         }
 
         result
+    }
+
+    fn pop<K: Clone + Ord, V>(head: &mut Option<Rc<RefCell<ListNode<K, V>>>>) -> Option<K> {
+        match head.take() {
+            None => None,
+            Some(node) => {
+                let k = node.borrow().key.clone();
+
+                match &node.borrow().next {
+                    None => {
+                        *head = None;
+                    }
+                    Some(n) => {
+                        head.replace(n.clone());
+                    }
+                }
+
+                Some(k)
+            }
+        }
+    }
+
+    #[test]
+    fn base_from_vec_test() {
+        let mut list = base_from_vec(to_pair(vec![2, 6, 9, 11, 15]));
+
+        ListNode::print(&list, Box::new(|k| print!("{} ", k)));
+
+        assert_eq!(Some(2), pop(&mut list));
+        assert_eq!(Some(6), pop(&mut list));
+        assert_eq!(Some(9), pop(&mut list));
+        assert_eq!(Some(11), pop(&mut list));
+        assert_eq!(Some(15), pop(&mut list));
     }
 
     #[test]

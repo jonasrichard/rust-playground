@@ -11,28 +11,38 @@ use rand::prelude::*;
 struct ListNode<K: Clone + Ord, V> {
     key: K,
     value: V,
-    next: Option<Rc<RefCell<ListNode<K, V>>>>,
+    next: Option<ListNodeRef<K, V>>,
 }
+
+type ListNodeRef<K, V> = Rc<RefCell<ListNode<K, V>>>;
 
 #[derive(Debug)]
 struct IndexNode<K: Clone + Ord, V> {
     key: K,
     height: u8,
-    next: Option<Rc<RefCell<IndexNode<K, V>>>>,
+    next: Option<IndexNodeRef<K, V>>,
     next_level: LowerNode<K, V>,
 }
 
+type IndexNodeRef<K, V> = Rc<RefCell<IndexNode<K, V>>>;
+
 #[derive(Debug)]
 enum LowerNode<K: Clone + Ord, V> {
-    Index(Rc<RefCell<IndexNode<K, V>>>),
-    Base(Rc<RefCell<ListNode<K, V>>>),
+    Index(IndexNodeRef<K, V>),
+    Base(ListNodeRef<K, V>),
 }
 
 #[derive(Debug)]
 struct SkipList<K: Clone + Ord, V> {
     // 0 is the lowest index list, and n is the highest, the less dense list
-    heads: Vec<Option<Rc<RefCell<IndexNode<K, V>>>>>,
-    base: Option<Rc<RefCell<ListNode<K, V>>>>,
+    heads: Vec<Option<IndexNodeRef<K, V>>>,
+    base: Option<ListNodeRef<K, V>>,
+}
+
+enum SearchStep<K: Clone + Ord, V> {
+    Found(ListNodeRef<K, V>),
+    NotFound(K),
+    Step(LowerNode<K, V>),
 }
 
 impl<K: Clone + Ord, V> SkipList<K, V> {
@@ -46,7 +56,7 @@ impl<K: Clone + Ord, V> SkipList<K, V> {
 
 impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
     /// Insert a new element in the head of the base list
-    fn prepend(entry: &mut Option<Rc<RefCell<ListNode<K, V>>>>, key: &K, value: V) {
+    fn prepend(entry: &mut Option<ListNodeRef<K, V>>, key: &K, value: V) {
         let new_elem = Rc::new(RefCell::new(ListNode {
             key: key.clone(),
             value,
@@ -67,17 +77,17 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
     // place of the new element. If we insert a new element we return its
     // reference, if the element is already in the list we return None.
     fn insert_into_base_list(
-        entry: &mut Option<Rc<RefCell<ListNode<K, V>>>>,
+        entry: &mut Option<ListNodeRef<K, V>>,
         key: &K,
         value: V,
-    ) -> Option<Rc<RefCell<ListNode<K, V>>>> {
+    ) -> Option<ListNodeRef<K, V>> {
         if entry.is_none() {
             Self::prepend(entry, key, value);
 
             return entry.clone();
         }
 
-        let mut prev: Option<Rc<RefCell<ListNode<K, V>>>> = None;
+        let mut prev: Option<ListNodeRef<K, V>> = None;
         let mut p = match entry {
             Some(ref node) => Some(Rc::clone(node)),
             None => unreachable!(),
@@ -151,8 +161,8 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
     // the insert.
     fn levelled_insert(
         &mut self,
-        level_prevs: Vec<Option<Rc<RefCell<IndexNode<K, V>>>>>,
-        base_prev: Option<Rc<RefCell<ListNode<K, V>>>>,
+        level_prevs: Vec<Option<IndexNodeRef<K, V>>>,
+        base_prev: Option<ListNodeRef<K, V>>,
         key: &K,
         value: V,
     ) {
@@ -219,10 +229,10 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
         }
 
         let mut level_prevs = vec![None; self.heads.len()];
-        let mut base_prev: Option<Rc<RefCell<ListNode<K, V>>>> = None;
+        let mut base_prev: Option<ListNodeRef<K, V>> = None;
         let mut idx = self.heads.last().unwrap().as_ref().cloned();
         let mut level = self.heads.len();
-        let mut level_prev: Option<Rc<RefCell<IndexNode<K, V>>>> = None;
+        let mut level_prev: Option<IndexNodeRef<K, V>> = None;
 
         loop {
             let idx_rc = match idx {
@@ -230,7 +240,7 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
                 Some(ref irc) => Rc::clone(irc),
             };
 
-            let compare = idx_rc.borrow().key.cmp(&key);
+            let compare = idx_rc.borrow().key.cmp(key);
 
             match compare {
                 Ordering::Less => {
@@ -251,7 +261,7 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
                             None => todo!(),
                             Some(ref level_prev_ref) => {
                                 idx = match level_prev_ref.borrow().next_level {
-                                    LowerNode::Index(ref i) => Some(Rc::clone(&i)),
+                                    LowerNode::Index(ref i) => Some(Rc::clone(i)),
                                     LowerNode::Base(_) => unreachable!(),
                                 }
                             }
@@ -287,6 +297,98 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
         // 3            1/64
     }
 
+    /// Step one in the skiplist with comparing the key and return with
+    /// not found, found or step if there are more steps in the search.
+    fn search_step(node: SearchStep<K, V>, key: &K) -> SearchStep<K, V> {
+        match node {
+            result @ SearchStep::NotFound(_) => result,
+            result @ SearchStep::Found(_) => result,
+            SearchStep::Step(LowerNode::Index(iref)) => {
+                let borrowed = iref.borrow();
+
+                if borrowed.key < *key {
+                    match &borrowed.next {
+                        None => SearchStep::NotFound(key.clone()),
+                        Some(bnext) => SearchStep::Step(LowerNode::Index(Rc::clone(&bnext))),
+                    }
+                } else {
+                    match &borrowed.next_level {
+                        LowerNode::Index(iiref) => {
+                            SearchStep::Step(LowerNode::Index(Rc::clone(&iiref)))
+                        }
+                        LowerNode::Base(nref) => {
+                            SearchStep::Step(LowerNode::Base(Rc::clone(&nref)))
+                        }
+                    }
+                }
+            }
+            SearchStep::Step(LowerNode::Base(nref)) => {
+                let borrowed = nref.borrow();
+                let cmp = borrowed.key.cmp(key);
+
+                match cmp {
+                    Ordering::Less => match &borrowed.next {
+                        None => SearchStep::NotFound(key.clone()),
+                        Some(next_node) => SearchStep::Step(LowerNode::Base(Rc::clone(&next_node))),
+                    },
+                    Ordering::Equal => SearchStep::Found(nref.clone()),
+                    Ordering::Greater => SearchStep::NotFound(key.clone()),
+                }
+            }
+        }
+    }
+
+    fn contains_key(&self, key: &K) -> bool {
+        let head = self.heads.last().unwrap();
+
+        let mut prev = None;
+        let mut p: Option<LowerNode<K, V>> = head.as_ref().cloned().map(|v| LowerNode::Index(v));
+
+        loop {
+            match p {
+                None => todo!(),
+                Some(LowerNode::Index(indexRef)) => {
+                    let compare = indexRef.borrow().key.cmp(key);
+
+                    match compare {
+                        Ordering::Less => {
+                            prev = Some(Rc::clone(&indexRef));
+                            p = indexRef
+                                .borrow()
+                                .next
+                                .as_ref()
+                                .map(|v| LowerNode::Index(v.clone()));
+                        }
+                        Ordering::Equal => {
+                            return true;
+                        }
+                        Ordering::Greater => {
+                            prev = None;
+                            p = match &indexRef.borrow().next_level {
+                                LowerNode::Base(nref) => Some(LowerNode::Base(nref.clone())),
+                                LowerNode::Index(iref) => Some(LowerNode::Index(iref.clone())),
+                            };
+                        }
+                    }
+                }
+                Some(LowerNode::Base(ref nodeRef)) => {
+                    //let mut nref = nodeRef;
+
+                    //loop {
+                    //    if nref.borrow().key < *key {
+                    //        nref = match &nref.borrow().next {
+                    //            None => {
+                    //                return false;
+                    //            }
+                    //            Some(next_ref) => Rc::clone(&next_ref),
+                    //        };
+                    //    }
+                    //}
+                }
+            }
+        }
+    }
+
     fn print(&self, printer: Box<dyn Fn(&K)>) {
         for i in (0..self.heads.len()).rev() {
             let mut h = self.heads[i].clone();
@@ -309,7 +411,7 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
 }
 
 impl<K: Clone + Ord, V> ListNode<K, V> {
-    fn print(head: &Option<Rc<RefCell<ListNode<K, V>>>>, printer: Box<dyn Fn(&K)>) {
+    fn print(head: &Option<ListNodeRef<K, V>>, printer: Box<dyn Fn(&K)>) {
         let mut head = head.clone();
 
         while let Some(node) = head {
@@ -322,17 +424,14 @@ impl<K: Clone + Ord, V> ListNode<K, V> {
 }
 
 fn main() {
-    //let mut list = SkipList::<usize, String>::new(4);
-    let mut base = None;
+    let mut list = SkipList::<usize, String>::new(4);
 
     for i in [10, 8, 12, 9, 15] {
-        //let n = SkipList::<usize, String>::insert_into_base_list(&mut base, &i, format!("{}", i));
-        SkipList::insert_into_base_list(&mut base, &i, format!("{}", i));
-        println!("{:?}", base);
-        //println!("new {:?}", n);
-    }
+        println!("Inserting {}", i);
 
-    ListNode::print(&base, Box::new(|k| print!("{:?}  ", k)));
+        list.insert(&i, format!("{}", i));
+        list.print(Box::new(|k| print!("{} ", k)));
+    }
 
     //for _ in 0..5 {
     //    let value = rand::random::<usize>() % 50;
@@ -351,12 +450,12 @@ fn main() {
 mod tests {
     use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
-    use crate::{IndexNode, ListNode, LowerNode, SkipList};
+    use crate::{IndexNode, IndexNodeRef, ListNode, ListNodeRef, LowerNode, SearchStep, SkipList};
 
     fn lookup_in_base<K: Clone + Ord, V>(
-        head: Option<Rc<RefCell<ListNode<K, V>>>>,
+        head: Option<ListNodeRef<K, V>>,
         key: &K,
-    ) -> Rc<RefCell<ListNode<K, V>>> {
+    ) -> ListNodeRef<K, V> {
         let mut head = head;
 
         loop {
@@ -376,9 +475,9 @@ mod tests {
     }
 
     fn lookup_in_index<K: Clone + Ord, V>(
-        head: Option<Rc<RefCell<IndexNode<K, V>>>>,
+        head: Option<IndexNodeRef<K, V>>,
         key: &K,
-    ) -> Rc<RefCell<IndexNode<K, V>>> {
+    ) -> IndexNodeRef<K, V> {
         let mut head = head;
 
         loop {
@@ -397,10 +496,8 @@ mod tests {
         panic!("Cannot find key in the list");
     }
 
-    fn base_from_vec<K: Clone + Ord, V>(
-        values: Vec<(K, V)>,
-    ) -> Option<Rc<RefCell<ListNode<K, V>>>> {
-        let mut base: Option<Rc<RefCell<ListNode<K, V>>>> = None;
+    fn base_from_vec<K: Clone + Ord, V>(values: Vec<(K, V)>) -> Option<ListNodeRef<K, V>> {
+        let mut base: Option<ListNodeRef<K, V>> = None;
         let mut prev = None;
 
         for (k, v) in values {
@@ -429,8 +526,8 @@ mod tests {
 
     fn indexes_from_vecs<K: Clone + Ord, V>(
         values: Vec<Vec<K>>,
-        base: Option<Rc<RefCell<ListNode<K, V>>>>,
-    ) -> Vec<Option<Rc<RefCell<IndexNode<K, V>>>>> {
+        base: Option<ListNodeRef<K, V>>,
+    ) -> Vec<Option<IndexNodeRef<K, V>>> {
         let mut heads = vec![None; values.len()];
 
         for (level, level_vec) in values.into_iter().enumerate() {
@@ -493,7 +590,7 @@ mod tests {
         result
     }
 
-    fn pop<K: Clone + Ord, V>(head: &mut Option<Rc<RefCell<ListNode<K, V>>>>) -> Option<K> {
+    fn pop<K: Clone + Ord, V>(head: &mut Option<ListNodeRef<K, V>>) -> Option<K> {
         match head.take() {
             None => None,
             Some(node) => {
@@ -534,6 +631,55 @@ mod tests {
         );
 
         list.print(Box::new(|v| print!("{} ", v)));
+    }
+
+    //#[test]
+    //fn insert_into_empty_list() {
+    //    let mut list = SkipList::<usize, String>::new(4);
+
+    //    list.insert(&5, "5".into());
+
+    //    assert!(list.contains_key(&5));
+    //}
+
+    #[test]
+    fn search_step_test() {
+        let list = from_vecs(
+            to_pair(vec![4, 6, 9, 10, 15, 19, 25]),
+            vec![vec![4, 10, 19], vec![4, 19], vec![4]],
+        );
+
+        let h = Rc::clone(list.heads.last().unwrap().as_ref().unwrap());
+
+        let mut step = SearchStep::Step(LowerNode::Index(h));
+
+        step = SkipList::search_step(step, &15);
+        if let SearchStep::Step(LowerNode::Index(iref)) = &step {
+            assert_eq!(4, iref.borrow().key);
+            assert_eq!(2, iref.borrow().height);
+        }
+
+        step = SkipList::search_step(step, &15);
+        if let SearchStep::Step(LowerNode::Index(iref)) = &step {
+            assert_eq!(10, iref.borrow().key);
+            assert_eq!(2, iref.borrow().height);
+        }
+
+        step = SkipList::search_step(step, &15);
+        if let SearchStep::Step(LowerNode::Index(iref)) = &step {
+            assert_eq!(10, iref.borrow().key);
+            assert_eq!(1, iref.borrow().height);
+        }
+
+        step = SkipList::search_step(step, &15);
+        if let SearchStep::Step(LowerNode::Base(nref)) = &step {
+            assert_eq!(10, nref.borrow().key);
+        }
+
+        step = SkipList::search_step(step, &15);
+        if let SearchStep::Found(node_ref) = &step {
+            assert_eq!(15, node_ref.borrow().key);
+        }
     }
 
     //#[test]

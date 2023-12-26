@@ -42,7 +42,13 @@ struct SkipList<K: Clone + Ord, V> {
 enum SearchStep<K: Clone + Ord, V> {
     Found(ListNodeRef<K, V>),
     NotFound(K),
-    Step(LowerNode<K, V>),
+    InProgress,
+}
+
+struct SearchIter<K: Clone + Ord, V> {
+    key: K,
+    prev: Option<LowerNode<K, V>>,
+    current: Option<LowerNode<K, V>>,
 }
 
 impl<K: Clone + Ord, V> SkipList<K, V> {
@@ -50,6 +56,15 @@ impl<K: Clone + Ord, V> SkipList<K, V> {
         SkipList {
             heads: (0..(height - 1)).map(|_| None).collect(),
             base: None,
+        }
+    }
+}
+
+impl<K: Clone + Ord, V> Clone for LowerNode<K, V> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Index(iref) => Self::Index(iref.clone()),
+            Self::Base(nref) => Self::Base(nref.clone()),
         }
     }
 }
@@ -297,94 +312,27 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
         // 3            1/64
     }
 
-    /// Step one in the skiplist with comparing the key and return with
-    /// not found, found or step if there are more steps in the search.
-    fn search_step(node: SearchStep<K, V>, key: &K) -> SearchStep<K, V> {
-        match node {
-            result @ SearchStep::NotFound(_) => result,
-            result @ SearchStep::Found(_) => result,
-            SearchStep::Step(LowerNode::Index(iref)) => {
-                let borrowed = iref.borrow();
-
-                if borrowed.key < *key {
-                    match &borrowed.next {
-                        None => SearchStep::NotFound(key.clone()),
-                        Some(bnext) => SearchStep::Step(LowerNode::Index(Rc::clone(&bnext))),
-                    }
-                } else {
-                    match &borrowed.next_level {
-                        LowerNode::Index(iiref) => {
-                            SearchStep::Step(LowerNode::Index(Rc::clone(&iiref)))
-                        }
-                        LowerNode::Base(nref) => {
-                            SearchStep::Step(LowerNode::Base(Rc::clone(&nref)))
-                        }
-                    }
-                }
-            }
-            SearchStep::Step(LowerNode::Base(nref)) => {
-                let borrowed = nref.borrow();
-                let cmp = borrowed.key.cmp(key);
-
-                match cmp {
-                    Ordering::Less => match &borrowed.next {
-                        None => SearchStep::NotFound(key.clone()),
-                        Some(next_node) => SearchStep::Step(LowerNode::Base(Rc::clone(&next_node))),
-                    },
-                    Ordering::Equal => SearchStep::Found(nref.clone()),
-                    Ordering::Greater => SearchStep::NotFound(key.clone()),
-                }
-            }
+    fn search(&self, key: &K) -> SearchIter<K, V> {
+        SearchIter {
+            key: key.clone(),
+            prev: None,
+            current: self
+                .heads
+                .last()
+                .unwrap()
+                .as_ref()
+                .map(|v| LowerNode::Index(Rc::clone(v))),
         }
     }
 
     fn contains_key(&self, key: &K) -> bool {
-        let head = self.heads.last().unwrap();
-
-        let mut prev = None;
-        let mut p: Option<LowerNode<K, V>> = head.as_ref().cloned().map(|v| LowerNode::Index(v));
+        let mut i = self.search(key);
 
         loop {
-            match p {
-                None => todo!(),
-                Some(LowerNode::Index(indexRef)) => {
-                    let compare = indexRef.borrow().key.cmp(key);
-
-                    match compare {
-                        Ordering::Less => {
-                            prev = Some(Rc::clone(&indexRef));
-                            p = indexRef
-                                .borrow()
-                                .next
-                                .as_ref()
-                                .map(|v| LowerNode::Index(v.clone()));
-                        }
-                        Ordering::Equal => {
-                            return true;
-                        }
-                        Ordering::Greater => {
-                            prev = None;
-                            p = match &indexRef.borrow().next_level {
-                                LowerNode::Base(nref) => Some(LowerNode::Base(nref.clone())),
-                                LowerNode::Index(iref) => Some(LowerNode::Index(iref.clone())),
-                            };
-                        }
-                    }
-                }
-                Some(LowerNode::Base(ref nodeRef)) => {
-                    //let mut nref = nodeRef;
-
-                    //loop {
-                    //    if nref.borrow().key < *key {
-                    //        nref = match &nref.borrow().next {
-                    //            None => {
-                    //                return false;
-                    //            }
-                    //            Some(next_ref) => Rc::clone(&next_ref),
-                    //        };
-                    //    }
-                    //}
-                }
+            match i.search_step() {
+                SearchStep::Found(_) => break true,
+                SearchStep::NotFound(_) => break false,
+                SearchStep::InProgress => {}
             }
         }
     }
@@ -423,6 +371,77 @@ impl<K: Clone + Ord, V> ListNode<K, V> {
     }
 }
 
+impl<K: Clone + Ord, V> SearchIter<K, V> {
+    /// Step one in the skiplist with comparing the key and return with
+    /// not found, found or step if there are more steps in the search.
+    fn search_step(&mut self) -> SearchStep<K, V> {
+        if self.current.is_none() {
+            return SearchStep::NotFound(self.key.clone());
+        }
+
+        let current_rc = match &self.current {
+            None => unreachable!(),
+            Some(ln) => ln.clone(),
+        };
+
+        match current_rc {
+            LowerNode::Index(iref) => {
+                self.prev = Some(LowerNode::Index(Rc::clone(&iref)));
+
+                let borrowed = iref.borrow();
+                let cmp = borrowed.key.cmp(&self.key);
+
+                match cmp {
+                    Ordering::Less => {
+                        self.current = borrowed.next.as_ref().cloned().map(|v| LowerNode::Index(v));
+                        SearchStep::InProgress
+                    }
+                    Ordering::Equal => {
+                        self.prev = None;
+                        self.current = Some(borrowed.next_level.clone());
+                        SearchStep::InProgress
+                    }
+                    Ordering::Greater => match self.prev.take() {
+                        None => {
+                            self.current = None;
+                            SearchStep::NotFound(self.key.clone())
+                        }
+                        Some(LowerNode::Index(iiref)) => {
+                            self.current = Some(iiref.borrow().next_level.clone());
+                            SearchStep::InProgress
+                        }
+                        Some(LowerNode::Base(_)) => {
+                            self.current = None;
+                            SearchStep::NotFound(self.key.clone())
+                        }
+                    },
+                }
+            }
+            LowerNode::Base(nref) => {
+                self.prev = Some(LowerNode::Base(Rc::clone(&nref)));
+
+                let borrowed = nref.borrow();
+                let cmp = borrowed.key.cmp(&self.key);
+
+                match cmp {
+                    Ordering::Less => {
+                        self.current = borrowed.next.as_ref().cloned().map(|v| LowerNode::Base(v));
+                        SearchStep::InProgress
+                    }
+                    Ordering::Equal => {
+                        self.current = None;
+                        SearchStep::Found(Rc::clone(&nref))
+                    }
+                    Ordering::Greater => {
+                        self.current = None;
+                        SearchStep::NotFound(self.key.clone())
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let mut list = SkipList::<usize, String>::new(4);
 
@@ -432,6 +451,8 @@ fn main() {
         list.insert(&i, format!("{}", i));
         list.print(Box::new(|k| print!("{} ", k)));
     }
+
+    println!("Contains 12? {}", list.contains_key(&12));
 
     //for _ in 0..5 {
     //    let value = rand::random::<usize>() % 50;
@@ -643,43 +664,22 @@ mod tests {
     //}
 
     #[test]
-    fn search_step_test() {
+    fn search_step_test() {}
+
+    #[test]
+    fn contains_key_test() {
         let list = from_vecs(
             to_pair(vec![4, 6, 9, 10, 15, 19, 25]),
             vec![vec![4, 10, 19], vec![4, 19], vec![4]],
         );
 
-        let h = Rc::clone(list.heads.last().unwrap().as_ref().unwrap());
-
-        let mut step = SearchStep::Step(LowerNode::Index(h));
-
-        step = SkipList::search_step(step, &15);
-        if let SearchStep::Step(LowerNode::Index(iref)) = &step {
-            assert_eq!(4, iref.borrow().key);
-            assert_eq!(2, iref.borrow().height);
-        }
-
-        step = SkipList::search_step(step, &15);
-        if let SearchStep::Step(LowerNode::Index(iref)) = &step {
-            assert_eq!(10, iref.borrow().key);
-            assert_eq!(2, iref.borrow().height);
-        }
-
-        step = SkipList::search_step(step, &15);
-        if let SearchStep::Step(LowerNode::Index(iref)) = &step {
-            assert_eq!(10, iref.borrow().key);
-            assert_eq!(1, iref.borrow().height);
-        }
-
-        step = SkipList::search_step(step, &15);
-        if let SearchStep::Step(LowerNode::Base(nref)) = &step {
-            assert_eq!(10, nref.borrow().key);
-        }
-
-        step = SkipList::search_step(step, &15);
-        if let SearchStep::Found(node_ref) = &step {
-            assert_eq!(15, node_ref.borrow().key);
-        }
+        assert!(list.contains_key(&4));
+        assert!(list.contains_key(&6));
+        assert!(list.contains_key(&9));
+        assert!(list.contains_key(&10));
+        assert!(list.contains_key(&15));
+        assert!(list.contains_key(&19));
+        assert!(list.contains_key(&25));
     }
 
     //#[test]

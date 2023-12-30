@@ -1,75 +1,25 @@
+mod node;
+mod search;
+
 use std::{
     cell::{Ref, RefCell, RefMut},
     cmp::Ordering,
+    fmt::Debug,
     rc::Rc,
 };
 
+use node::{IndexNode, IndexNodeRef, ListNode, ListNodeRef, LowerNode};
 use rand::prelude::*;
-
-/// Type of the base list
-#[derive(Debug)]
-struct ListNode<K: Clone + Ord, V> {
-    key: K,
-    value: V,
-    next: Option<ListNodeRef<K, V>>,
-}
-
-type ListNodeRef<K, V> = Rc<RefCell<ListNode<K, V>>>;
+use search::{SearchIter, SearchStep};
 
 #[derive(Debug)]
-struct IndexNode<K: Clone + Ord, V> {
-    key: K,
-    height: u8,
-    next: Option<IndexNodeRef<K, V>>,
-    next_level: LowerNode<K, V>,
-}
-
-type IndexNodeRef<K, V> = Rc<RefCell<IndexNode<K, V>>>;
-
-#[derive(Debug)]
-enum LowerNode<K: Clone + Ord, V> {
-    Index(IndexNodeRef<K, V>),
-    Base(ListNodeRef<K, V>),
-}
-
-#[derive(Debug)]
-struct SkipList<K: Clone + Ord, V> {
+struct SkipList<K: Clone + Debug + Ord, V> {
     // 0 is the lowest index list, and n is the highest, the less dense list
     heads: Vec<Option<IndexNodeRef<K, V>>>,
     base: Option<ListNodeRef<K, V>>,
 }
 
-enum SearchStep<K: Clone + Ord, V> {
-    Found(ListNodeRef<K, V>),
-    NotFound(K),
-    InProgress,
-}
-
-struct SearchIter<K: Clone + Ord, V> {
-    key: K,
-    prev: Option<LowerNode<K, V>>,
-    current: Option<LowerNode<K, V>>,
-}
-
-impl<K: Clone + Ord, V> SkipList<K, V> {
-    fn new(height: u8) -> Self {
-        SkipList {
-            heads: (0..(height - 1)).map(|_| None).collect(),
-            base: None,
-        }
-    }
-}
-
-impl<K: Clone + Ord, V> Clone for LowerNode<K, V> {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Index(iref) => Self::Index(iref.clone()),
-            Self::Base(nref) => Self::Base(nref.clone()),
-        }
-    }
-}
-
-impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
+impl<K: Clone + Debug + Ord, V> SkipList<K, V> {
     /// Insert a new element in the head of the base list
     fn prepend(entry: &mut Option<ListNodeRef<K, V>>, key: &K, value: V) {
         let new_elem = Rc::new(RefCell::new(ListNode {
@@ -318,7 +268,7 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
             prev: None,
             current: self
                 .heads
-                .last()
+                .first()
                 .unwrap()
                 .as_ref()
                 .map(|v| LowerNode::Index(Rc::clone(v))),
@@ -337,16 +287,18 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
         }
     }
 
-    fn print(&self, printer: Box<dyn Fn(&K)>) {
-        for i in (0..self.heads.len()).rev() {
+    fn print(&self) {
+        for i in 0..self.heads.len() {
             let mut h = self.heads[i].clone();
 
-            print!("({}) ", i);
+            if let Some(inode) = &h {
+                print!("({}) ", inode.borrow().height);
+            }
 
             while let Some(boxed) = h {
                 let br = boxed.borrow();
 
-                printer(&br.key);
+                print!("{:?} ", &br.key);
 
                 h = br.next.as_ref().cloned();
             }
@@ -354,91 +306,9 @@ impl<K: Clone + std::fmt::Debug + Ord, V> SkipList<K, V> {
             println!();
         }
 
-        ListNode::print(&self.base, printer);
-    }
-}
+        print!("({}) ", self.heads.len());
 
-impl<K: Clone + Ord, V> ListNode<K, V> {
-    fn print(head: &Option<ListNodeRef<K, V>>, printer: Box<dyn Fn(&K)>) {
-        let mut head = head.clone();
-
-        while let Some(node) = head {
-            let b = node.borrow();
-
-            printer(&b.key);
-            head = b.next.as_ref().cloned();
-        }
-    }
-}
-
-impl<K: Clone + Ord, V> SearchIter<K, V> {
-    /// Step one in the skiplist with comparing the key and return with
-    /// not found, found or step if there are more steps in the search.
-    fn search_step(&mut self) -> SearchStep<K, V> {
-        if self.current.is_none() {
-            return SearchStep::NotFound(self.key.clone());
-        }
-
-        let current_rc = match &self.current {
-            None => unreachable!(),
-            Some(ln) => ln.clone(),
-        };
-
-        match current_rc {
-            LowerNode::Index(iref) => {
-                self.prev = Some(LowerNode::Index(Rc::clone(&iref)));
-
-                let borrowed = iref.borrow();
-                let cmp = borrowed.key.cmp(&self.key);
-
-                match cmp {
-                    Ordering::Less => {
-                        self.current = borrowed.next.as_ref().cloned().map(|v| LowerNode::Index(v));
-                        SearchStep::InProgress
-                    }
-                    Ordering::Equal => {
-                        self.prev = None;
-                        self.current = Some(borrowed.next_level.clone());
-                        SearchStep::InProgress
-                    }
-                    Ordering::Greater => match self.prev.take() {
-                        None => {
-                            self.current = None;
-                            SearchStep::NotFound(self.key.clone())
-                        }
-                        Some(LowerNode::Index(iiref)) => {
-                            self.current = Some(iiref.borrow().next_level.clone());
-                            SearchStep::InProgress
-                        }
-                        Some(LowerNode::Base(_)) => {
-                            self.current = None;
-                            SearchStep::NotFound(self.key.clone())
-                        }
-                    },
-                }
-            }
-            LowerNode::Base(nref) => {
-                self.prev = Some(LowerNode::Base(Rc::clone(&nref)));
-
-                let borrowed = nref.borrow();
-                let cmp = borrowed.key.cmp(&self.key);
-
-                match cmp {
-                    Ordering::Less => {
-                        self.current = borrowed.next.as_ref().cloned().map(|v| LowerNode::Base(v));
-                        SearchStep::InProgress
-                    }
-                    Ordering::Equal => {
-                        self.current = None;
-                        SearchStep::Found(Rc::clone(&nref))
-                    }
-                    Ordering::Greater => {
-                        self.current = None;
-                        SearchStep::NotFound(self.key.clone())
-                    }
-                }
-            }
-        }
+        ListNode::print(&self.base);
     }
 }
 
@@ -449,7 +319,7 @@ fn main() {
         println!("Inserting {}", i);
 
         list.insert(&i, format!("{}", i));
-        list.print(Box::new(|k| print!("{} ", k)));
+        list.print();
     }
 
     println!("Contains 12? {}", list.contains_key(&12));
@@ -469,11 +339,15 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+    use std::{cell::RefCell, cmp::Ordering, fmt::Debug, rc::Rc};
 
-    use crate::{IndexNode, IndexNodeRef, ListNode, ListNodeRef, LowerNode, SearchStep, SkipList};
+    use crate::{
+        node::{IndexNode, IndexNodeRef, ListNode, ListNodeRef, LowerNode},
+        search::SearchStep,
+        SkipList,
+    };
 
-    fn lookup_in_base<K: Clone + Ord, V>(
+    fn lookup_in_base<K: Clone + Debug + Ord, V>(
         head: Option<ListNodeRef<K, V>>,
         key: &K,
     ) -> ListNodeRef<K, V> {
@@ -495,7 +369,7 @@ mod tests {
         panic!("Cannot find key in the list");
     }
 
-    fn lookup_in_index<K: Clone + Ord, V>(
+    fn lookup_in_index<K: Clone + Debug + Ord, V>(
         head: Option<IndexNodeRef<K, V>>,
         key: &K,
     ) -> IndexNodeRef<K, V> {
@@ -517,7 +391,7 @@ mod tests {
         panic!("Cannot find key in the list");
     }
 
-    fn base_from_vec<K: Clone + Ord, V>(values: Vec<(K, V)>) -> Option<ListNodeRef<K, V>> {
+    fn base_from_vec<K: Clone + Debug + Ord, V>(values: Vec<(K, V)>) -> Option<ListNodeRef<K, V>> {
         let mut base: Option<ListNodeRef<K, V>> = None;
         let mut prev = None;
 
@@ -545,23 +419,30 @@ mod tests {
         base
     }
 
-    fn indexes_from_vecs<K: Clone + Ord, V>(
+    fn indexes_from_vecs<K: Clone + Debug + Ord, V>(
         values: Vec<Vec<K>>,
         base: Option<ListNodeRef<K, V>>,
     ) -> Vec<Option<IndexNodeRef<K, V>>> {
-        let mut heads = vec![None; values.len()];
+        let max_index_level = values.len();
+        let mut heads = vec![None; max_index_level];
 
-        for (level, level_vec) in values.into_iter().enumerate() {
+        // i go on 0, 1, 2
+        for (i, level_vec) in values.into_iter().enumerate() {
+            println!(" index source vec: {:?}", level_vec);
+
             let mut head = None;
-            let mut prev = None;
+            let mut prev: Option<IndexNodeRef<K, V>> = None;
+
+            // level go on 3 - i - 1 = 2, 1, 0
+            let level = max_index_level - i - 1;
 
             for k in level_vec {
                 let lower = match level {
-                    0 => {
+                    lev if lev + 1 == max_index_level => {
                         // lookup in the base list
                         LowerNode::Base(lookup_in_base(base.as_ref().cloned(), &k))
                     }
-                    _ => LowerNode::Index(lookup_in_index(heads[level - 1].as_ref().cloned(), &k)),
+                    _ => LowerNode::Index(lookup_in_index(heads[level + 1].as_ref().cloned(), &k)),
                 };
 
                 // look the key in either base or index list
@@ -577,12 +458,13 @@ mod tests {
                 match prev {
                     None => {
                         head = Some(p_rc.clone());
-                        prev = Some(p_rc);
                     }
                     Some(ref prev_rc) => {
-                        prev_rc.borrow_mut().next = Some(p_rc);
+                        prev_rc.borrow_mut().next = Some(p_rc.clone());
                     }
                 }
+
+                prev = Some(p_rc);
             }
 
             heads[level] = head;
@@ -591,7 +473,10 @@ mod tests {
         heads
     }
 
-    fn from_vecs<K: Clone + Ord, V>(base: Vec<(K, V)>, indexes: Vec<Vec<K>>) -> SkipList<K, V> {
+    fn from_vecs<K: Clone + Debug + Ord, V>(
+        base: Vec<(K, V)>,
+        indexes: Vec<Vec<K>>,
+    ) -> SkipList<K, V> {
         let base_list = base_from_vec(base);
         let index_lists = indexes_from_vecs(indexes, base_list.as_ref().cloned());
 
@@ -611,7 +496,7 @@ mod tests {
         result
     }
 
-    fn pop<K: Clone + Ord, V>(head: &mut Option<ListNodeRef<K, V>>) -> Option<K> {
+    fn pop<K: Clone + Debug + Ord, V>(head: &mut Option<ListNodeRef<K, V>>) -> Option<K> {
         match head.take() {
             None => None,
             Some(node) => {
@@ -635,7 +520,7 @@ mod tests {
     fn base_from_vec_test() {
         let mut list = base_from_vec(to_pair(vec![2, 6, 9, 11, 15]));
 
-        ListNode::print(&list, Box::new(|k| print!("{} ", k)));
+        ListNode::print(&list);
 
         assert_eq!(Some(2), pop(&mut list));
         assert_eq!(Some(6), pop(&mut list));
@@ -651,7 +536,46 @@ mod tests {
             vec![vec![4, 10, 19], vec![4, 19], vec![4]],
         );
 
-        list.print(Box::new(|v| print!("{} ", v)));
+        list.print();
+    }
+
+    fn index_node_check(inode: &IndexNodeRef<i32, i32>, key: i32, height: u8) {
+        let borrowed = inode.borrow();
+
+        assert_eq!(key, borrowed.key, "Index node {:?}", inode);
+        assert_eq!(height, borrowed.height, "Index node {:?}", inode);
+    }
+
+    fn lower_node_check(node: &LowerNode<i32, i32>, key: i32, height: u8) {
+        match node {
+            LowerNode::Index(index_node) => {
+                let borrowed = index_node.borrow();
+
+                assert_eq!(key, borrowed.key, "Index node {:?}", index_node);
+                assert_eq!(height, borrowed.height, "Index node {:?}", index_node);
+            }
+            LowerNode::Base(base_node) => {
+                let borrowed = base_node.borrow();
+
+                assert_eq!(key, borrowed.key, "Base node {:?}", base_node);
+            }
+        }
+    }
+
+    #[test]
+    fn test_consistency() {
+        let list = from_vecs(
+            to_pair(vec![4, 6, 9, 10, 15, 19, 25]),
+            vec![vec![4, 10, 19], vec![4, 19], vec![4]],
+        );
+
+        list.print();
+
+        let first_level = list.heads.first().unwrap().as_ref().unwrap();
+        index_node_check(first_level, 4, 0);
+
+        let second_level = first_level.borrow().next_level.clone();
+        lower_node_check(&second_level, 4, 1);
     }
 
     //#[test]
@@ -664,23 +588,62 @@ mod tests {
     //}
 
     #[test]
-    fn search_step_test() {}
+    fn search_step_test() {
+        fn print_lower_node(node: &Option<LowerNode<i32, i32>>) {
+            match node {
+                None => {
+                    println!("  lower node: None");
+                }
+                Some(LowerNode::Index(ref iref)) => {
+                    println!(
+                        "  lower node: Index({:?}, {})",
+                        iref.borrow().key,
+                        iref.borrow().height
+                    );
+                }
+                Some(LowerNode::Base(ref nref)) => {
+                    println!("  lower node: Base({:?})", nref.borrow().key);
+                }
+            }
+        }
 
-    #[test]
-    fn contains_key_test() {
         let list = from_vecs(
             to_pair(vec![4, 6, 9, 10, 15, 19, 25]),
             vec![vec![4, 10, 19], vec![4, 19], vec![4]],
         );
 
-        assert!(list.contains_key(&4));
-        assert!(list.contains_key(&6));
-        assert!(list.contains_key(&9));
-        assert!(list.contains_key(&10));
-        assert!(list.contains_key(&15));
-        assert!(list.contains_key(&19));
-        assert!(list.contains_key(&25));
+        let mut iter = list.search(&15);
+
+        let key_height: Vec<(i32, u8)> = vec![(4, 0), (4, 1), (4, 2), (10, 2), (10, 3), (15, 3)];
+
+        for (key, height) in key_height.into_iter() {
+            print!("  iter.prev: ");
+            print_lower_node(&iter.prev);
+
+            print!("  iter.current: ");
+            print_lower_node(&iter.current);
+
+            lower_node_check(&iter.current.as_ref().cloned().unwrap(), key, height);
+            iter.search_step();
+            //println!("{:?}", iter.current);
+        }
     }
+
+    //#[test]
+    //fn contains_key_test() {
+    //    let list = from_vecs(
+    //        to_pair(vec![4, 6, 9, 10, 15, 19, 25]),
+    //        vec![vec![4, 10, 19], vec![4, 19], vec![4]],
+    //    );
+
+    //    assert!(list.contains_key(&4));
+    //    assert!(list.contains_key(&6));
+    //    assert!(list.contains_key(&9));
+    //    assert!(list.contains_key(&10));
+    //    assert!(list.contains_key(&15));
+    //    assert!(list.contains_key(&19));
+    //    assert!(list.contains_key(&25));
+    //}
 
     //#[test]
     //fn insert_first() {

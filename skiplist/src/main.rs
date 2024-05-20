@@ -645,15 +645,14 @@ mod tests {
     //    assert!(list.contains_key(&25));
     //}
 
-    //#[test]
-    //fn insert_first() {
-    //    let mut list = SkipList::<usize>::new(4);
+    #[test]
+    fn insert_first() {
+        let mut list = SkipList::<usize, usize>::new(4);
 
-    //    list.insert(8);
-    //    list.insert(5);
+        list.insert(&8, 8);
+        list.insert(&5, 8);
 
-    //    let level0 = list_to_vec(&list.heads[0]);
-
-    //    assert_eq!(vec![5, 8], level0);
-    //}
+        assert!(list.contains_key(&5));
+        assert!(list.contains_key(&8));
+    }
 }
